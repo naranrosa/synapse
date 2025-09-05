@@ -1310,3 +1310,64 @@ input[readonly] { background-color: var(--surface-muted-color); cursor: not-allo
         height: 50px;
     }
 }
+/* ============================================================= */
+/* --- ESTILOS PARA A TELA DE CARREGAMENTO (LOADING) --- */
+/* ============================================================= */
+
+/* Animação de pulsação */
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 0.7;
+  }
+}
+
+/* VERSÃO CORRIGIDA PARA CENTRALIZAÇÃO GARANTIDA */
+.loading-fullscreen {
+  /* Posicionamento fixo para cobrir a tela inteira */
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 100%;
+
+  /* Centralização com Flexbox */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+  gap: 1.5rem;
+
+  /* Estilos visuais */
+  background-color: var(--background-color);
+  color: var(--primary-color);
+  z-index: 9999; /* Garante que fique acima de tudo */
+}
+
+.loading-fullscreen .logo-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 80px;
+  height: 80px;
+  background-color: var(--primary-color);
+  color: var(--text-on-primary-color);
+  border-radius: 50%;
+  animation: pulse 2s infinite ease-in-out;
+}
+
+.loading-fullscreen .logo-container .material-symbols-outlined {
+  font-size: 3rem;
+  opacity: 1 !important;
+}
+
+.loading-fullscreen h2 {
+  font-size: 1.25rem;
+  font-weight: 500;
+  color: var(--text-muted-color);
+  margin: 0; /* Reseta margens que possam interferir */
+}
