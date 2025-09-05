@@ -1108,6 +1108,12 @@ const App = () => {
   const [appLoading, setAppLoading] = useState(true);
 
   const { addToast } = useToast();
+  
+  // EFEITO PARA SINCRONIZAR O TEMA COM O ATRIBUTO DA TAG <html>
+  useEffect(() => {
+    // document.documentElement é uma referência direta à tag <html>
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]); // Este efeito executa toda vez que o estado 'theme' muda.
 
   // === EFEITO 1: GERENCIAR A SESSÃO DE AUTENTICAÇÃO ===
   useEffect(() => {
