@@ -1108,18 +1108,19 @@ const App = () => {
   const [appLoading, setAppLoading] = useState(true);
 
   const { addToast } = useToast();
-  
+
   // EFEITO PARA SINCRONIZAR O TEMA COM O ATRIBUTO DA TAG <html>
   useEffect(() => {
     // document.documentElement é uma referência direta à tag <html>
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]); // Este efeito executa toda vez que o estado 'theme' muda.
 
-  // === EFEITO 1: GERENCIAR A SESSÃO DE AUTENTICAÇÃO ===
-  useEffect(() => {
-  const fetchSessionAndProfile = async () => {
+// === GERENCIAR SESSÃO E EVENTOS DE LOGIN/LOGOUT ===
+useEffect(() => {
+  let isMounted = true;
+
+  const loadProfile = async (session: any) => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
         const { data: profile, error } = await supabase
           .from('doctors')
@@ -1128,23 +1129,37 @@ const App = () => {
           .single();
 
         if (error || !profile) {
-          // sessão inválida -> força logout
+          console.warn("Perfil não encontrado, forçando logout.");
           await supabase.auth.signOut();
-          setLoggedInUser(null);
+          if (isMounted) setLoggedInUser(null);
         } else {
-          setLoggedInUser(profile);
+          if (isMounted) setLoggedInUser(profile);
         }
       } else {
-        setLoggedInUser(null);
+        if (isMounted) setLoggedInUser(null);
       }
     } catch (err) {
-      console.error("Erro ao buscar sessão:", err);
-      setLoggedInUser(null);
+      console.error("Erro ao carregar perfil:", err);
+      if (isMounted) setLoggedInUser(null);
     } finally {
-      setAppLoading(false); // garante que nunca fica preso no loading
+      if (isMounted) setAppLoading(false);
     }
   };
-  fetchSessionAndProfile();
+
+  // 1. Checa sessão inicial
+  supabase.auth.getSession().then(({ data }) => loadProfile(data.session));
+
+  // 2. Escuta eventos de login/logout
+  const { data: { subscription } } = supabase.auth.onAuthStateChange(
+    (_event, session) => {
+      loadProfile(session);
+    }
+  );
+
+  return () => {
+    isMounted = false;
+    subscription.unsubscribe();
+  };
 }, []);
 
 
@@ -1189,10 +1204,20 @@ const App = () => {
 
   // === FUNÇÕES DE MANIPULAÇÃO DE DADOS (CRUD) ===
   const handleLogout = async () => {
-      await supabase.auth.signOut();
-      setUsers([]); setSurgeries([]); setHospitals([]); setInsurancePlans([]);
-      setCurrentView('dashboard');
-  };
+  try {
+    await supabase.auth.signOut();
+  } catch (err) {
+    console.error("Erro ao sair:", err);
+  } finally {
+    setLoggedInUser(null); // <- IMPORTANTE
+    setUsers([]);
+    setSurgeries([]);
+    setHospitals([]);
+    setInsurancePlans([]);
+    setCurrentView('dashboard');
+  }
+};
+
 
   const handleSaveSurgery = async (formData: Omit<Surgery, 'id'>, files: { preOp?: File, postOp?: File }) => {
     // Garante que a função não execute se o usuário não estiver logado.
