@@ -264,8 +264,6 @@ const AppHeader: React.FC<{
   );
 };
 
-// ENCONTRE O COMPONENTE SurgeryModal E SUBSTITUA-O INTEIRAMENTE
-
 /**
  * Componente: Modal de Cirurgia (Adicionar/Editar)
  */
@@ -284,11 +282,12 @@ const SurgeryModal: React.FC<{
         hospital_id: hospitals[0]?.id || 0, insurance_id: insurancePlans[0]?.id || 0, auth_status: 'Pendente' as const,
         surgery_status: 'Agendada' as const, fees: { [mainSurgeonId]: 0 }, notes: '',
         pre_op_xray_path: undefined, post_op_xray_path: undefined,
-        terceiro_auxiliar_cost: 1000,
-        instrumentador_cost: 500,
-        anestesista_cost: 2500,
-        hospital_uti_cost: 8000,
-        material_cost: 7000,
+        // --- CORREÇÃO APLICADA: Valores padrão zerados conforme solicitado ---
+        terceiro_auxiliar_cost: 0,
+        instrumentador_cost: 400, // Valor ajustado para 400
+        anestesista_cost: 0,
+        hospital_uti_cost: 0,
+        material_cost: 0, // 'Prótese'
     };
   }, [initialDate, loggedInUser, hospitals, insurancePlans]);
 
@@ -418,12 +417,12 @@ const SurgeryModal: React.FC<{
             <div className="form-section"><h4>Financeiro</h4><div className="form-grid">
               <div className="form-group full-width"><label>Distribuição de Honorários</label><div className="fee-distribution">{doctorsForFees.map(doc => (<div key={doc.id} className="fee-item"><label htmlFor={`fee-${doc.id}`}>{doc.name}</label><input type="number" id={`fee-${doc.id}`} value={formData.fees[String(doc.id)] === 0 ? '' : (formData.fees[String(doc.id)] ?? '')} onChange={(e) => handleFeeChange(doc.id, e.target.value)} placeholder="0,00"/></div>))}</div></div>
 
-              <div className="form-group"><label htmlFor="terceiro_auxiliar_cost">3º Auxiliar</label><input type="number" id="terceiro_auxiliar_cost" name="terceiro_auxiliar_cost" value={formData.terceiro_auxiliar_cost} onChange={handleChange} placeholder="0,00" /></div>
-              <div className="form-group"><label htmlFor="instrumentador_cost">Instrumentador</label><input type="number" id="instrumentador_cost" name="instrumentador_cost" value={formData.instrumentador_cost} onChange={handleChange} placeholder="0,00" /></div>
-              <div className="form-group"><label htmlFor="anestesista_cost">Anestesista</label><input type="number" id="anestesista_cost" name="anestesista_cost" value={formData.anestesista_cost} onChange={handleChange} placeholder="0,00" /></div>
-              <div className="form-group"><label htmlFor="hospital_uti_cost">Despesa Hospitalar + UTI</label><input type="number" id="hospital_uti_cost" name="hospital_uti_cost" value={formData.hospital_uti_cost} onChange={handleChange} placeholder="0,00" /></div>
+              <div className="form-group"><label htmlFor="terceiro_auxiliar_cost">3º Auxiliar</label><input type="number" id="terceiro_auxiliar_cost" name="terceiro_auxiliar_cost" value={formData.terceiro_auxiliar_cost === 0 ? '' : formData.terceiro_auxiliar_cost} onChange={handleChange} placeholder="0,00" /></div>
+              <div className="form-group"><label htmlFor="instrumentador_cost">Instrumentador</label><input type="number" id="instrumentador_cost" name="instrumentador_cost" value={formData.instrumentador_cost === 0 ? '' : formData.instrumentador_cost} onChange={handleChange} placeholder="0,00" /></div>
+              <div className="form-group"><label htmlFor="anestesista_cost">Anestesista</label><input type="number" id="anestesista_cost" name="anestesista_cost" value={formData.anestesista_cost === 0 ? '' : formData.anestesista_cost} onChange={handleChange} placeholder="0,00" /></div>
+              <div className="form-group"><label htmlFor="hospital_uti_cost">Despesa Hospitalar + UTI</label><input type="number" id="hospital_uti_cost" name="hospital_uti_cost" value={formData.hospital_uti_cost === 0 ? '' : formData.hospital_uti_cost} onChange={handleChange} placeholder="0,00" /></div>
 
-              <div className="form-group full-width"><label htmlFor="material_cost">Prótese</label><input type="number" id="material_cost" name="material_cost" value={formData.material_cost} onChange={handleChange} placeholder="0,00" /></div>
+              <div className="form-group full-width"><label htmlFor="material_cost">Prótese</label><input type="number" id="material_cost" name="material_cost" value={formData.material_cost === 0 ? '' : formData.material_cost} onChange={handleChange} placeholder="0,00" /></div>
 
               <div className="form-group full-width" style={{ textAlign: 'right', marginTop: '1rem' }}><label>Valor Total da Cirurgia</label><input type="text" className="total-cost-input" value={totalCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} readOnly /></div>
             </div></div>
@@ -446,6 +445,7 @@ const SurgeryModal: React.FC<{
     </div>
   );
 };
+
 
 /**
  * Componente: Tela de Cadastros (SettingsView)
@@ -931,8 +931,6 @@ const DashboardView: React.FC<{
     );
 };
 
-// COLE ESTE BLOCO DE CÓDIGO JUNTO COM SEUS OUTROS COMPONENTES, ANTES DO COMPONENTE "APP"
-
 /**
  * Componente: Visão de Administração de Usuários
  * Responsabilidade: Permitir que administradores criem, editem e excluam perfis de usuários.
@@ -1252,68 +1250,72 @@ useEffect(() => {
 };
 
 
-  const handleSaveSurgery = async (formData: Omit<Surgery, 'id'>, files: { preOp?: File, postOp?: File }) => {
-    // Garante que a função não execute se o usuário não estiver logado.
+  // --- CORREÇÃO APLICADA: Lógica de salvamento robusta ---
+  const handleSaveSurgery = async (formData: any, files: { preOp?: File, postOp?: File }) => {
     if (!loggedInUser) {
         addToast('Erro: Usuário não autenticado.', 'error');
         return;
     }
 
     try {
-        // Desestrutura os dados do formulário. Os caminhos dos raios-X são tratados separadamente.
-        let { pre_op_xray_path, post_op_xray_path, ...restOfData } = formData;
+        // Função para limpar nomes de arquivos, removendo caracteres especiais.
+        const sanitizeFilename = (name: string) => {
+            // Substitui caracteres acentuados e especiais por '_' e remove espaços múltiplos.
+            return name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9.\-_]/g, '_').replace(/\s+/g, '_');
+        };
 
-        // --- LÓGICA DE UPLOAD PARA O RAIO-X PRÉ-OPERATÓRIO ---
-        // Verifica se um novo arquivo pré-operatório foi selecionado no formulário.
+        let pre_op_xray_path = formData.pre_op_xray_path;
+        let post_op_xray_path = formData.post_op_xray_path;
+
         if (files.preOp && files.preOp instanceof File) {
-            // Cria um nome de arquivo único para evitar conflitos no bucket.
-            // Ex: 'uuid-do-usuario/timestamp-atual-nome-original.pdf'
-            const filePath = `${loggedInUser.id}/${Date.now()}-${files.preOp.name}`;
-
-            // Faz o upload do arquivo para o bucket 'xrays'.
+            const sanitizedName = sanitizeFilename(files.preOp.name);
+            const filePath = `${loggedInUser.id}/${Date.now()}-${sanitizedName}`;
             const { error: uploadError } = await supabase.storage.from('xrays').upload(filePath, files.preOp);
-
-            // Se houver um erro no upload, interrompe a execução e mostra uma notificação.
             if (uploadError) throw uploadError;
-
-            // Se o upload for bem-sucedido, atualiza a variável com o novo caminho do arquivo.
             pre_op_xray_path = filePath;
         }
 
-        // --- LÓGICA DE UPLOAD PARA O RAIO-X PÓS-OPERATÓRIO ---
-        // Verifica se um novo arquivo pós-operatório foi selecionado.
         if (files.postOp && files.postOp instanceof File) {
-            const filePath = `${loggedInUser.id}/${Date.now()}-${files.postOp.name}`;
+            const sanitizedName = sanitizeFilename(files.postOp.name);
+            const filePath = `${loggedInUser.id}/${Date.now()}-${sanitizedName}`;
             const { error: uploadError } = await supabase.storage.from('xrays').upload(filePath, files.postOp);
             if (uploadError) throw uploadError;
             post_op_xray_path = filePath;
         }
 
-        // Junta os dados do formulário com os caminhos dos arquivos atualizados.
-        const dataToSave = { ...restOfData, pre_op_xray_path, post_op_xray_path };
+        // Cria um objeto 'limpo' contendo APENAS os campos que existem na tabela 'surgeries'.
+        // Isso evita o erro "Invalid key" causado por enviar campos extras (ex: anestesista_cost).
+        const dataToSave: Omit<Surgery, 'id'> = {
+            patient_name: formData.patient_name,
+            main_surgeon_id: formData.main_surgeon_id,
+            participating_ids: formData.participating_ids || [],
+            date_time: formData.date_time,
+            hospital_id: formData.hospital_id,
+            insurance_id: formData.insurance_id,
+            auth_status: formData.auth_status,
+            surgery_status: formData.surgery_status,
+            fees: formData.fees || {},
+            material_cost: formData.material_cost || 0,
+            notes: formData.notes || '',
+            pre_op_xray_path: pre_op_xray_path,
+            post_op_xray_path: post_op_xray_path,
+        };
 
-        // Se estamos editando uma cirurgia (surgeryToEdit não é nulo), incluímos o ID
-        // para que o 'upsert' saiba qual registro deve atualizar.
         const idToUpsert = surgeryToEdit ? { id: surgeryToEdit.id } : {};
-
-        // --- LÓGICA DE BANCO DE DADOS ---
-        // 'upsert' é uma operação inteligente:
-        // - Se 'idToUpsert' contém um ID que já existe na tabela, ele ATUALIZA esse registro.
-        // - Se não houver ID ou o ID não existir, ele INSERE um novo registro.
         const { error: dbError } = await supabase.from('surgeries').upsert({ ...dataToSave, ...idToUpsert });
 
-        // Se houver um erro ao salvar no banco, interrompe a execução.
         if (dbError) throw dbError;
 
-        // Se tudo deu certo, mostra uma mensagem de sucesso e fecha o modal.
         addToast(surgeryToEdit ? 'Cirurgia atualizada com sucesso!' : 'Cirurgia salva com sucesso!', 'success');
         setIsModalOpen(false);
-        setSurgeryToEdit(null); // Limpa o estado de edição
+        setSurgeryToEdit(null);
 
     } catch (error: any) {
-        // Captura qualquer erro que possa ter ocorrido (upload ou banco de dados)
-        // e exibe uma notificação para o usuário.
-        addToast(`Erro ao salvar cirurgia: ${error.message}`, 'error');
+        let errorMessage = error.message;
+        if (error.message.includes('Storage')) {
+            errorMessage = `Falha no upload do arquivo: ${error.message}`;
+        }
+        addToast(`Erro ao salvar cirurgia: ${errorMessage}`, 'error');
     }
   };
 
