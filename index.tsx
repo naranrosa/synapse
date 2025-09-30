@@ -29,11 +29,11 @@ interface Surgery {
   patient_name: string;
   main_surgeon_id: string; // Chave estrangeira para o UUID de um Doctor
   participating_ids: string[]; // Um array de UUIDs de Doctors
-  date_time: string; // Corresponde a um timestamp
+  date_time: string | null; // Corresponde a um timestamp, agora pode ser nulo
   hospital_id: number; // Chave estrangeira para o ID de um Hospital
   insurance_id: number; // Chave estrangeira para o ID de um InsurancePlan
   auth_status: 'Pendente' | 'Liberado' | 'Recusado';
-  surgery_status: 'Agendada' | 'Realizada' | 'Cancelada';
+  surgery_status: 'Solicitada' | 'Agendada' | 'Realizada' | 'Cancelada';
   fees: Record<string, number>; // Corresponde ao tipo JSONB
   material_cost: number; // Corresponde ao tipo numeric
   notes: string;
@@ -190,7 +190,7 @@ const LoginView: React.FC = () => {
  */
 const AppHeader: React.FC<{
   currentView: string;
-  onNavigate: (view: 'dashboard' | 'agenda' | 'relatorios' | 'cadastros' | 'admin') => void;
+  onNavigate: (view: 'dashboard' | 'agenda' | 'solicitacoes' | 'relatorios' | 'cadastros' | 'admin') => void;
   loggedInUser: Doctor;
   onLogout: () => void;
   searchQuery: string;
@@ -220,9 +220,9 @@ const AppHeader: React.FC<{
       <nav>
         <a href="#dashboard" className={currentView === 'dashboard' ? 'active' : ''} onClick={() => onNavigate('dashboard')}>Dashboard</a>
         <a href="#agenda" className={currentView === 'agenda' ? 'active' : ''} onClick={() => onNavigate('agenda')}>Agenda</a>
+        <a href="#solicitacoes" className={currentView === 'solicitacoes' ? 'active' : ''} onClick={() => onNavigate('solicitacoes')}>Solicitações</a>
         <a href="#relatorios" className={currentView === 'relatorios' ? 'active' : ''} onClick={() => onNavigate('relatorios')}>Relatórios</a>
         <a href="#cadastros" className={currentView === 'cadastros' ? 'active' : ''} onClick={() => onNavigate('cadastros')}>Cadastros</a>
-        {/* Renderização condicional do link de Admin baseado no perfil do usuário */}
         {loggedInUser.is_admin && (
            <a href="#admin" className={currentView === 'admin' ? 'active' : ''} onClick={() => onNavigate('admin')}>Administradores</a>
         )}
@@ -275,21 +275,22 @@ const SurgeryModal: React.FC<{
 }> = ({ isOpen, onClose, onSave, hospitals, insurancePlans, surgeryToEdit, initialDate, loggedInUser, users }) => {
 
   const createInitialState = useCallback(() => {
-    const defaultDateTime = `${initialDate.getFullYear()}-${String(initialDate.getMonth() + 1).padStart(2, '0')}-${String(initialDate.getDate()).padStart(2, '0')}T10:00`;
+    // --- ALTERAÇÃO: A data inicial é nula por padrão, para novas solicitações ---
+    const defaultDateTime = surgeryToEdit?.date_time ? new Date(surgeryToEdit.date_time).toISOString().slice(0, 16) : null;
     const mainSurgeonId = loggedInUser.id || '';
     return {
         patient_name: '', main_surgeon_id: mainSurgeonId, participating_ids: [] as string[], date_time: defaultDateTime,
         hospital_id: hospitals[0]?.id || 0, insurance_id: insurancePlans[0]?.id || 0, auth_status: 'Pendente' as const,
-        surgery_status: 'Agendada' as const, fees: { [mainSurgeonId]: 0 }, notes: '',
+        surgery_status: 'Solicitada' as const, fees: { [mainSurgeonId]: 0 }, notes: '',
         pre_op_xray_path: undefined, post_op_xray_path: undefined,
-        // --- CORREÇÃO APLICADA: Valores padrão zerados conforme solicitado ---
         terceiro_auxiliar_cost: 0,
-        instrumentador_cost: 400, // Valor ajustado para 400
+        instrumentador_cost: 400,
         anestesista_cost: 0,
         hospital_uti_cost: 0,
-        material_cost: 0, // 'Prótese'
+        material_cost: 0,
     };
-  }, [initialDate, loggedInUser, hospitals, insurancePlans]);
+  }, [loggedInUser, hospitals, insurancePlans, surgeryToEdit]);
+
 
   const [formData, setFormData] = useState(createInitialState());
   const [files, setFiles] = useState<{ preOp?: File, postOp?: File }>({});
@@ -300,6 +301,7 @@ const SurgeryModal: React.FC<{
             setFormData({
                 ...createInitialState(),
                 ...surgeryToEdit,
+                date_time: surgeryToEdit.date_time ? new Date(surgeryToEdit.date_time).toISOString().slice(0, 16) : null,
                 fees: surgeryToEdit.fees || {},
                 participating_ids: surgeryToEdit.participating_ids || []
             });
@@ -356,6 +358,11 @@ const SurgeryModal: React.FC<{
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.patient_name.trim()) { alert('O nome do paciente é obrigatório.'); return; }
+    // --- ALTERAÇÃO: Validação para exigir data apenas se o status for 'Agendada' ---
+    if (formData.surgery_status === 'Agendada' && !formData.date_time) {
+        addToast('Para agendar uma cirurgia, a data e hora são obrigatórias.', 'error');
+        return;
+    }
     onSave(formData, files);
   };
 
@@ -393,7 +400,7 @@ const SurgeryModal: React.FC<{
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <form onSubmit={handleSubmit}>
           <div className="modal-header">
-            <h3>{surgeryToEdit ? 'Editar Cirurgia' : 'Nova Cirurgia'}</h3>
+            <h3>{surgeryToEdit ? 'Editar Cirurgia' : 'Nova Solicitação'}</h3>
             <button type="button" className="close-btn" onClick={onClose} aria-label="Fechar">&times;</button>
           </div>
           <div className="modal-body">
@@ -406,11 +413,11 @@ const SurgeryModal: React.FC<{
 
             {/* --- Seção: Agendamento e Status --- */}
             <div className="form-section"><h4>Agendamento e Status</h4><div className="form-grid">
-                <div className="form-group"><label htmlFor="date_time">Data e Hora</label><input type="datetime-local" id="date_time" name="date_time" value={formData.date_time} onChange={handleChange} /></div>
+                <div className="form-group"><label htmlFor="date_time">Data e Hora (para agendamento)</label><input type="datetime-local" id="date_time" name="date_time" value={formData.date_time || ''} onChange={handleChange} /></div>
                 <div className="form-group"><label htmlFor="hospital_id">Hospital</label><select id="hospital_id" name="hospital_id" value={formData.hospital_id} onChange={handleChange}>{hospitals.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}</select></div>
                 <div className="form-group"><label htmlFor="insurance_id">Convênio / Particular</label><select id="insurance_id" name="insurance_id" value={formData.insurance_id} onChange={handleChange}>{insurancePlans.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
                 <div className="form-group"><label htmlFor="auth_status">Status de Liberação</label><select id="auth_status" name="auth_status" value={formData.auth_status} onChange={handleChange}><option>Pendente</option><option>Liberado</option><option>Recusado</option></select></div>
-                <div className="form-group"><label htmlFor="surgery_status">Status da Cirurgia</label><select id="surgery_status" name="surgery_status" value={formData.surgery_status} onChange={handleChange}><option>Agendada</option><option>Realizada</option><option>Cancelada</option></select></div>
+                <div className="form-group"><label htmlFor="surgery_status">Status do Processo</label><select id="surgery_status" name="surgery_status" value={formData.surgery_status} onChange={handleChange}><option>Solicitada</option><option>Agendada</option><option>Realizada</option><option>Cancelada</option></select></div>
             </div></div>
 
             {/* --- Seção: Financeiro (Layout Corrigido) --- */}
@@ -436,7 +443,7 @@ const SurgeryModal: React.FC<{
               <div className="form-group full-width"><label htmlFor="post_op_xray_path">Raio-X Pós-cirúrgico</label>
                 {formData.post_op_xray_path ? (<div className="file-display"><a href={getPublicUrl(formData.post_op_xray_path)} target="_blank" rel="noopener noreferrer">{formData.post_op_xray_path.split('/').pop()}</a><button type="button" className="btn-remove-file" onClick={() => setFormData(p => ({...p, post_op_xray_path: undefined}))}>&times;</button></div>) : (<input type="file" id="post_op_xray_path" name="post_op_xray_path" onChange={handleFileChange} accept="image/*,.pdf" />)}
               </div>
-              <div className="form-group full-width"><label htmlFor="notes">Notas</label><textarea id="notes" name="notes" value={formData.notes} onChange={handleChange}></textarea></div>
+              <div className="form-group full-width"><label htmlFor="notes">Notas (procedimento, detalhes, etc)</label><textarea id="notes" name="notes" value={formData.notes} onChange={handleChange}></textarea></div>
             </div></div>
           </div>
           <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={onClose}>Cancelar</button><button type="submit" className="btn btn-primary">Salvar</button></div>
@@ -465,18 +472,16 @@ const SettingsView: React.FC<{
     // Handler para o botão de adicionar hospital
     const handleAddHospital = async () => {
         if (newHospital.trim()) {
-            // Chama a função assíncrona passada pelo componente App
             await onAddHospital(newHospital.trim());
-            setNewHospital(''); // Limpa o campo de input após o sucesso
+            setNewHospital('');
         }
     };
 
     // Handler para o botão de adicionar convênio
     const handleAddPlan = async () => {
         if (newPlan.trim()) {
-            // Chama a função assíncrona passada pelo componente App
             await onAddPlan(newPlan.trim());
-            setNewPlan(''); // Limpa o campo de input após o sucesso
+            setNewPlan('');
         }
     };
 
@@ -500,7 +505,6 @@ const SettingsView: React.FC<{
                         {hospitals.map(h => (
                             <div key={h.id} className="list-item">
                                 <span>{h.name}</span>
-                                {/* Chama a função de deletar passada pelo App, com o ID do hospital */}
                                 <button className="btn btn-danger" onClick={() => onDeleteHospital(h.id)}>Excluir</button>
                             </div>
                         ))}
@@ -522,7 +526,6 @@ const SettingsView: React.FC<{
                         {insurancePlans.map(p => (
                             <div key={p.id} className="list-item">
                                 <span>{p.name}</span>
-                                 {/* Chama a função de deletar passada pelo App, com o ID do convênio */}
                                 <button className="btn btn-danger" onClick={() => onDeletePlan(p.id)}>Excluir</button>
                             </div>
                         ))}
@@ -566,7 +569,7 @@ const AdvancedFiltersPanel: React.FC<{
                 <div className="filters-panel-header"><h3>Filtros Avançados</h3><button className="close-btn" onClick={onClose} aria-label="Fechar">&times;</button></div>
                 <div className="filters-panel-body">
                     <div className="form-group"><label htmlFor="auth_status_filter">Status da Autorização</label><select id="auth_status_filter" name="auth_status" value={filters.auth_status} onChange={handleChange}><option value="all">Todos</option><option value="Pendente">Pendente</option><option value="Liberado">Liberado</option><option value="Recusado">Recusado</option></select></div>
-                    <div className="form-group"><label htmlFor="surgery_status_filter">Status da Cirurgia</label><select id="surgery_status_filter" name="surgery_status" value={filters.surgery_status} onChange={handleChange}><option value="all">Todos</option><option value="Agendada">Agendada</option><option value="Realizada">Realizada</option><option value="Cancelada">Cancelada</option></select></div>
+                    <div className="form-group"><label htmlFor="surgery_status_filter">Status da Cirurgia</label><select id="surgery_status_filter" name="surgery_status" value={filters.surgery_status} onChange={handleChange}><option value="all">Todos</option><option value="Solicitada">Solicitada</option><option value="Agendada">Agendada</option><option value="Realizada">Realizada</option><option value="Cancelada">Cancelada</option></select></div>
                     <div className="form-group"><label htmlFor="hospital_id_filter">Hospital</label><select id="hospital_id_filter" name="hospital_id" value={filters.hospital_id} onChange={handleChange}><option value="all">Todos</option>{hospitals.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}</select></div>
                     <div className="form-group"><label htmlFor="insurance_id_filter">Convênio</label><select id="insurance_id_filter" name="insurance_id" value={filters.insurance_id} onChange={handleChange}><option value="all">Todos</option>{insurancePlans.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
                 </div>
@@ -616,6 +619,7 @@ const CalendarView: React.FC<{
 
     const filteredSurgeries = useMemo(() => {
         return surgeries.filter(s => {
+            if (!['Agendada', 'Realizada'].includes(s.surgery_status)) return false;
             if (doctorFilter !== 'all' && s.main_surgeon_id !== doctorFilter && !(s.participating_ids || []).includes(String(doctorFilter))) return false;
             if (advancedFilters.auth_status !== 'all' && s.auth_status !== advancedFilters.auth_status) return false;
             if (advancedFilters.surgery_status !== 'all' && s.surgery_status !== advancedFilters.surgery_status) return false;
@@ -632,7 +636,8 @@ const CalendarView: React.FC<{
         const participants = (s.participating_ids || []).map(id => getUserById(id, users)?.name).filter(Boolean).join(', ');
         const hospital = hospitals.find(h => h.id === s.hospital_id)?.name || 'N/A';
         const insurance = insurancePlans.find(p => p.id === s.insurance_id)?.name || 'N/A';
-        return `Paciente: ${s.patient_name}\nData: ${new Date(s.date_time).toLocaleString('pt-BR')}\nHospital: ${hospital}\nConvênio: ${insurance}\nCirurgião: ${mainSurgeon}\n${participants ? `Equipe: ${participants}\n` : ''}Status: ${s.surgery_status}`;
+        const dateTime = s.date_time ? new Date(s.date_time).toLocaleString('pt-BR') : 'A definir';
+        return `Paciente: ${s.patient_name}\nData: ${dateTime}\nHospital: ${hospital}\nConvênio: ${insurance}\nCirurgião: ${mainSurgeon}\n${participants ? `Equipe: ${participants}\n` : ''}Status: ${s.surgery_status}`;
     };
 
     const onDragStart = (e: React.DragEvent, surgeryId: number) => e.dataTransfer.setData("surgeryId", String(surgeryId));
@@ -669,16 +674,16 @@ const CalendarView: React.FC<{
         <div className={gridClass}>
             {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map(day => <div key={day} className="calendar-header">{day}</div>)}
             {displayedGrid.map((date, index) => {
-                const daySurgeries = date ? filteredSurgeries.filter(s => new Date(s.date_time).toDateString() === date.toDateString()) : [];
+                const daySurgeries = date ? filteredSurgeries.filter(s => s.date_time && new Date(s.date_time).toDateString() === date.toDateString()) : [];
                 const dateString = date ? date.toISOString().split('T')[0] : '';
                 return (
                     <div key={index} className={`calendar-day ${!date ? 'other-month' : ''} ${date && date.getTime() === today.getTime() ? 'today' : ''} ${dateString === dragOverDate ? 'drag-over' : ''}`} onClick={() => date && onDayClick(date)} onDragOver={onDragOver} onDrop={(e) => date && onDrop(e, date)} onDragEnter={() => date && setDragOverDate(date.toISOString().split('T')[0])} onDragLeave={() => setDragOverDate(null)}>
                         {date && <span className="day-number">{date.getDate()}</span>}
-                        {daySurgeries.sort((a,b) => new Date(a.date_time).getTime() - new Date(b.date_time).getTime()).map(s => {
+                        {daySurgeries.sort((a,b) => new Date(a.date_time!).getTime() - new Date(b.date_time!).getTime()).map(s => {
                             const doctor = getUserById(s.main_surgeon_id, users);
                             return (
                                 <div key={s.id} draggable onDragStart={(e) => onDragStart(e, s.id)} className="surgery-item" style={{ '--doctor-color': doctor?.color } as React.CSSProperties} onClick={(e) => { e.stopPropagation(); onSurgeryClick(s); }} title={getSurgeryTooltip(s)}>
-                                    <div className="surgery-item-header"><span className="surgery-time">{new Date(s.date_time).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit'})}</span><span className={`material-symbols-outlined auth-status-icon status-${s.auth_status.toLowerCase()}`}>{getAuthStatusIcon(s.auth_status)}</span></div>
+                                    <div className="surgery-item-header"><span className="surgery-time">{s.date_time ? new Date(s.date_time).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit'}) : ''}</span><span className={`material-symbols-outlined auth-status-icon status-${s.auth_status.toLowerCase()}`}>{getAuthStatusIcon(s.auth_status)}</span></div>
                                     <div className="surgery-item-body"><span className="surgery-patient">{s.patient_name}</span><span className="surgery-hospital">{hospitals.find(h => h.id === s.hospital_id)?.name || 'N/A'}</span></div>
                                 </div>
                             );
@@ -709,6 +714,7 @@ const ReportsView: React.FC<{ surgeries: Surgery[]; hospitals: Hospital[]; insur
 
     const filteredSurgeries = useMemo(() => {
         return surgeries.filter(s => {
+            if (!s.date_time) return false;
             const surgeryDate = new Date(s.date_time);
             if (filters.startDate && surgeryDate < new Date(filters.startDate)) return false;
             if (filters.endDate) {
@@ -807,27 +813,28 @@ const DashboardView: React.FC<{
     hospitals: Hospital[];
     onViewDetails: (surgery: Surgery) => void;
     onUpdateStatus: (surgeryId: number, status: 'Realizada' | 'Cancelada') => void;
-}> = ({ surgeries, users, hospitals, onViewDetails, onUpdateStatus }) => {
+    // --- ALTERAÇÃO: Nova prop para navegar com filtro ---
+    onNavigateWithFilter: (view: 'solicitacoes', filters: any) => void;
+}> = ({ surgeries, users, hospitals, onViewDetails, onUpdateStatus, onNavigateWithFilter }) => {
 
-    // useMemo otimiza a performance, recalculando os dados apenas quando a lista de cirurgias muda.
     const { surgeriesToday, pendingAuthCount, monthRevenue } = useMemo(() => {
         const today = new Date();
-        today.setHours(0, 0, 0, 0); // Zera o tempo para comparar apenas a data
+        today.setHours(0, 0, 0, 0);
 
         const currentMonth = today.getMonth();
         const currentYear = today.getFullYear();
         const todayString = today.toDateString();
 
-        // CORREÇÃO APLICADA AQUI:
-        // A variável local agora se chama 'todaysSurgeries' e usa a prop 'surgeries' como fonte.
         const todaysSurgeries = surgeries
-            .filter(s => new Date(s.date_time).toDateString() === todayString)
-            .sort((a, b) => new Date(a.date_time).getTime() - new Date(b.date_time).getTime());
+            .filter(s => s.date_time && new Date(s.date_time).toDateString() === todayString)
+            .sort((a, b) => new Date(a.date_time!).getTime() - new Date(b.date_time!).getTime());
 
+        // --- ALTERAÇÃO: Lógica corrigida para contar apenas autorizações pendentes ---
         const pending = surgeries.filter(s => s.auth_status === 'Pendente').length;
 
         const revenue = surgeries
             .filter(s => {
+                if (!s.date_time) return false;
                 const sDate = new Date(s.date_time);
                 return s.surgery_status === 'Realizada' &&
                        sDate.getMonth() === currentMonth &&
@@ -838,19 +845,18 @@ const DashboardView: React.FC<{
                 return total + surgeryTotalFees;
             }, 0);
 
-        // A propriedade 'surgeriesToday' é criada aqui no objeto de retorno.
         return { surgeriesToday: todaysSurgeries, pendingAuthCount: pending, monthRevenue: revenue };
-    }, [surgeries]); // A dependência é apenas 'surgeries', que é o correto.
+    }, [surgeries]);
 
     return (
         <div className="dashboard-view">
-            {/* Seção 1: Cards de Resumo */}
             <div className="dashboard-cards">
                 <div className="dashboard-card">
                     <div className="dashboard-card-header"><h4>Cirurgias Hoje</h4><span className="material-symbols-outlined">today</span></div>
                     <p>{surgeriesToday.length}</p>
                 </div>
-                <div className="dashboard-card">
+                {/* --- ALTERAÇÃO: Adicionado onClick e classe 'clickable' --- */}
+                <div className="dashboard-card clickable" onClick={() => onNavigateWithFilter('solicitacoes', { auth_status: 'Pendente' })}>
                     <div className="dashboard-card-header"><h4>Autorizações Pendentes</h4><span className="material-symbols-outlined">pending_actions</span></div>
                     <p>{pendingAuthCount}</p>
                 </div>
@@ -860,7 +866,6 @@ const DashboardView: React.FC<{
                 </div>
             </div>
 
-            {/* Seção 2: Fluxo de Trabalho do Dia */}
             <div className="workflow-container">
                 <h2>Fluxo de Trabalho do Dia</h2>
                 {surgeriesToday.length > 0 ? (
@@ -882,7 +887,7 @@ const DashboardView: React.FC<{
                              return (
                                 <div key={s.id} className="workflow-card cancelled">
                                     <div className="workflow-info">
-                                         <div className="workflow-time">{new Date(s.date_time).toLocaleTimeString('pt-BR', {hour: '2-digit', minute: '2-digit'})}</div>
+                                         <div className="workflow-time">{s.date_time ? new Date(s.date_time).toLocaleTimeString('pt-BR', {hour: '2-digit', minute: '2-digit'}) : ''}</div>
                                          <h3>{s.patient_name}</h3>
                                          <p>{doctor?.name} &bull; {hospital?.name}</p>
                                     </div>
@@ -895,7 +900,7 @@ const DashboardView: React.FC<{
                             <div key={s.id} className="workflow-card">
                                 <div className="workflow-info">
                                     <div className="workflow-time" style={{'--doctor-color': doctor?.color} as React.CSSProperties}>
-                                        {new Date(s.date_time).toLocaleTimeString('pt-BR', {hour: '2-digit', minute: '2-digit'})}
+                                        {s.date_time ? new Date(s.date_time).toLocaleTimeString('pt-BR', {hour: '2-digit', minute: '2-digit'}) : ''}
                                     </div>
                                     <h3>{s.patient_name}</h3>
                                     <p>{doctor?.name} &bull; {hospital?.name}</p>
@@ -912,7 +917,6 @@ const DashboardView: React.FC<{
                                 <div className="workflow-steps">
                                     <WorkflowStep icon="event" label="Agendada" isCompleted={isScheduled} isActive={activeStep === 'Agendada'} isFirst />
                                     <WorkflowStep icon="verified_user" label="Liberado" isCompleted={isAuthorized} isActive={activeStep === 'Liberado'} />
-                                    {/* SEGUNDA CORREÇÃO APLICADA AQUI: `activeStep` em vez de `active_step` */}
                                     <WorkflowStep icon="health_and_safety" label="Realizada" isCompleted={isPerformed} isActive={activeStep === 'Realizada'} />
                                     <WorkflowStep icon="radiology" label="Pós-op" isCompleted={isPostOpDone} isActive={activeStep === 'Pós-op'} isLast />
                                 </div>
@@ -923,7 +927,7 @@ const DashboardView: React.FC<{
                      <div className="no-surgeries-workflow">
                         <span className="material-symbols-outlined">event_available</span>
                         <p>Nenhuma cirurgia agendada para hoje.</p>
-                        <p>Aproveite o dia ou adicione uma nova cirurgia no calendário.</p>
+                        <p>Aproveite o dia ou adicione uma nova solicitação.</p>
                     </div>
                 )}
             </div>
@@ -932,29 +936,112 @@ const DashboardView: React.FC<{
 };
 
 /**
+ * Componente: Visão de Solicitações
+ */
+const RequestsView: React.FC<{
+  surgeries: Surgery[];
+  users: Doctor[];
+  insurancePlans: InsurancePlan[];
+  onSurgeryClick: (surgery: Surgery) => void;
+  // --- ALTERAÇÃO: Recebe os filtros iniciais do Dashboard ---
+  initialFilters: any | null;
+}> = ({ surgeries, users, insurancePlans, onSurgeryClick, initialFilters }) => {
+  const [authFilter, setAuthFilter] = useState(initialFilters?.auth_status || 'all');
+
+  // --- ALTERAÇÃO: Sincroniza o filtro se o usuário navegar pelo Dashboard ---
+  useEffect(() => {
+    setAuthFilter(initialFilters?.auth_status || 'all');
+  }, [initialFilters]);
+
+  const filteredSurgeries = useMemo(() => {
+    return surgeries.filter(s => {
+      if (s.surgery_status !== 'Solicitada' && s.surgery_status !== 'Agendada') return false;
+      if (authFilter !== 'all' && s.auth_status !== authFilter) return false;
+      return true;
+    });
+  }, [surgeries, authFilter]);
+
+  return (
+    <div className="requests-container">
+      <div className="requests-header">
+        <h2>Solicitações e Pendências</h2>
+        <p>Cirurgias aguardando liberação ou agendamento. Clique em uma solicitação para atualizar.</p>
+      </div>
+
+      <div className="add-item-form">
+        <label>Filtrar por Status de Liberação:</label>
+        <select value={authFilter} onChange={(e) => setAuthFilter(e.target.value)}>
+            <option value="all">Todas</option>
+            <option value="Pendente">Apenas Pendentes</option>
+            <option value="Liberado">Apenas Liberadas</option>
+            <option value="Recusado">Apenas Recusadas</option>
+        </select>
+      </div>
+
+      <div className="requests-list">
+        {filteredSurgeries.length > 0 ? (
+          filteredSurgeries.map(s => {
+            const surgeon = getUserById(s.main_surgeon_id, users);
+            const plan = insurancePlans.find(p => p.id === s.insurance_id);
+            return (
+              <div key={s.id} className="request-card" onClick={() => onSurgeryClick(s)}>
+                <div className="request-card-header">
+                  <h3>{s.patient_name}</h3>
+                  <div className={`status-tag status-${s.auth_status.toLowerCase()}`}>
+                    <span className="material-symbols-outlined">
+                      {s.auth_status === 'Liberado' ? 'verified' : s.auth_status === 'Recusado' ? 'gpp_bad' : 'hourglass_top'}
+                    </span>
+                    {s.auth_status}
+                  </div>
+                </div>
+                <div className="request-card-body">
+                  <p><strong>Cirurgião:</strong> {surgeon?.name || 'N/A'}</p>
+                  <p><strong>Convênio:</strong> {plan?.name || 'N/A'}</p>
+                   {s.surgery_status === 'Agendada' && s.date_time && (
+                     <p><strong>Agendado:</strong> {new Date(s.date_time).toLocaleString('pt-BR')}</p>
+                   )}
+                  {s.notes && <p><strong>Procedimento:</strong> {s.notes}</p>}
+                </div>
+                <div className="request-card-footer">
+                  Clique para editar, agendar ou alterar status
+                </div>
+              </div>
+            );
+          })
+        ) : (
+          <div className="no-surgeries-workflow">
+            <span className="material-symbols-outlined">file_copy</span>
+            <p>Nenhuma solicitação encontrada com os filtros atuais.</p>
+            <p>Clique no botão '+' para adicionar uma nova solicitação.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+
+/**
  * Componente: Visão de Administração de Usuários
- * Responsabilidade: Permitir que administradores criem, editem e excluam perfis de usuários.
  */
 const AdminView: React.FC<{
   users: Doctor[];
   loggedInUser: Doctor;
   addToast: (msg: string, type: ToastType) => void;
-  onUsersChange: () => void; // Callback para recarregar a lista de usuários após uma alteração
+  onUsersChange: () => void;
 }> = ({ users, loggedInUser, addToast, onUsersChange }) => {
   const [editingUser, setEditingUser] = useState<Doctor | null>(null);
   const [formState, setFormState] = useState({ name: '', email: '', password: '', is_admin: false });
 
-  // Popula o formulário quando um usuário é selecionado para edição
   useEffect(() => {
     if (editingUser) {
       setFormState({
         name: editingUser.name,
         email: editingUser.email,
-        password: '', // A senha nunca é preenchida por segurança
+        password: '',
         is_admin: !!editingUser.is_admin
       });
     } else {
-      // Reseta o formulário para o estado de "novo usuário"
       setFormState({ name: '', email: '', password: '', is_admin: false });
     }
   }, [editingUser]);
@@ -972,23 +1059,21 @@ const AdminView: React.FC<{
     }
 
     try {
-        if (editingUser) { // Lógica para ATUALIZAR um usuário existente
+        if (editingUser) {
             const { error } = await supabase.from('doctors')
               .update({
                   name: formState.name,
-                  email: formState.email, // Nota: Alterar o e-mail aqui não altera o e-mail de login.
+                  email: formState.email,
                   is_admin: formState.is_admin
               })
               .eq('id', editingUser.id);
             if (error) throw error;
             addToast('Usuário atualizado com sucesso!', 'success');
-        } else { // Lógica para CRIAR um novo usuário
+        } else {
             if (!formState.password) {
               addToast('A senha é obrigatória para novos usuários.', 'error');
               return;
             }
-            // Passo 1: Cria o usuário no sistema de autenticação do Supabase.
-            // Nota de segurança: Idealmente, isso seria feito em uma Edge Function para não expor a API de signUp.
             const { data: authData, error: authError } = await supabase.auth.signUp({
               email: formState.email,
               password: formState.password
@@ -996,24 +1081,22 @@ const AdminView: React.FC<{
             if (authError) throw authError;
             if (!authData.user) throw new Error("Não foi possível criar o usuário na autenticação.");
 
-            // Passo 2: Cria o perfil correspondente na tabela 'doctors'.
             const { error: profileError } = await supabase.from('doctors').insert({
               id: authData.user.id,
               name: formState.name,
               email: formState.email,
               is_admin: formState.is_admin,
-              color: `hsl(${Math.random() * 360}, 70%, 50%)` // Gera uma cor aleatória para o novo médico
+              color: `hsl(${Math.random() * 360}, 70%, 50%)`
             });
 
-            // Se a criação do perfil falhar, tenta reverter a criação do usuário na autenticação.
             if (profileError) {
                 await supabase.auth.admin.deleteUser(authData.user.id);
                 throw profileError;
             }
             addToast('Usuário adicionado com sucesso!', 'success');
         }
-        setEditingUser(null); // Limpa o formulário
-        onUsersChange(); // Sinaliza ao componente App para recarregar a lista de usuários
+        setEditingUser(null);
+        onUsersChange();
     } catch (error: any) {
         addToast(`Erro: ${error.message}`, 'error');
     }
@@ -1026,9 +1109,6 @@ const AdminView: React.FC<{
       }
       if (window.confirm('Tem certeza de que deseja excluir este perfil de usuário? A exclusão é permanente.')) {
         try {
-            // Isso deleta apenas o perfil na tabela 'doctors'.
-            // O login em 'auth.users' precisa ser removido manualmente por um admin no painel do Supabase
-            // ou através de uma Edge Function segura.
             const { error } = await supabase.from('doctors').delete().eq('id', userId);
             if(error) throw error;
             addToast('Perfil de usuário excluído com sucesso!', 'success');
@@ -1096,9 +1176,9 @@ const DayDetailPanel: React.FC<{ isOpen: boolean; onClose: () => void; selectedD
                 <div className="day-detail-header"><h3>{selectedDate.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</h3><button className="close-btn" onClick={onClose} aria-label="Fechar">&times;</button></div>
                 <div className="day-detail-body">
                     {surgeriesForDay.length > 0 ? (
-                        surgeriesForDay.sort((a,b) => new Date(a.date_time).getTime() - new Date(b.date_time).getTime()).map(s => {
+                        surgeriesForDay.sort((a,b) => new Date(a.date_time!).getTime() - new Date(b.date_time!).getTime()).map(s => {
                             const doctor = getUserById(s.main_surgeon_id, users);
-                            const time = new Date(s.date_time).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit'});
+                            const time = s.date_time ? new Date(s.date_time).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit'}) : '';
                             return (<div key={s.id} className="surgery-item" onClick={() => onSurgeryClick(s)} style={{'--doctor-color': doctor?.color} as React.CSSProperties}>
                                 <div className="surgery-item-content"><span className="surgery-time">{time}</span><span className="surgery-patient">{s.patient_name}</span></div>
                             </div>);
@@ -1118,35 +1198,31 @@ const DayDetailPanel: React.FC<{ isOpen: boolean; onClose: () => void; selectedD
  * =================================================================================
  */
 const App = () => {
-  // === ESTADOS DE UI (Interface do Usuário) ===
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
-  const [currentView, setCurrentView] = useState<'dashboard' | 'agenda' | 'relatorios' | 'cadastros' | 'admin'>('dashboard');
+  const [currentView, setCurrentView] = useState<'dashboard' | 'agenda' | 'solicitacoes' | 'relatorios' | 'cadastros' | 'admin'>('dashboard');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [surgeryToEdit, setSurgeryToEdit] = useState<Surgery | null>(null);
   const [modalInitialDate, setModalInitialDate] = useState(new Date());
   const [isDayPanelOpen, setIsDayPanelOpen] = useState(false);
   const [selectedDateForPanel, setSelectedDateForPanel] = useState<Date | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  // --- ALTERAÇÃO: Novo estado para controlar filtros entre componentes ---
+  const [initialFilters, setInitialFilters] = useState<any | null>(null);
 
-  // === ESTADOS DE DADOS (Carregados do Supabase) ===
   const [users, setUsers] = useState<Doctor[]>([]);
   const [surgeries, setSurgeries] = useState<Surgery[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [insurancePlans, setInsurancePlans] = useState<InsurancePlan[]>([]);
 
-  // === ESTADO DE AUTENTICAÇÃO E CARREGAMENTO GERAL ===
   const [loggedInUser, setLoggedInUser] = useState<Doctor | null>(null);
   const [appLoading, setAppLoading] = useState(true);
 
   const { addToast } = useToast();
 
-  // EFEITO PARA SINCRONIZAR O TEMA COM O ATRIBUTO DA TAG <html>
   useEffect(() => {
-    // document.documentElement é uma referência direta à tag <html>
     document.documentElement.setAttribute('data-theme', theme);
-  }, [theme]); // Este efeito executa toda vez que o estado 'theme' muda.
+  }, [theme]);
 
-// === GERENCIAR SESSÃO E EVENTOS DE LOGIN/LOGOUT ===
 useEffect(() => {
   let isMounted = true;
 
@@ -1177,10 +1253,8 @@ useEffect(() => {
     }
   };
 
-  // 1. Checa sessão inicial
   supabase.auth.getSession().then(({ data }) => loadProfile(data.session));
 
-  // 2. Escuta eventos de login/logout
   const { data: { subscription } } = supabase.auth.onAuthStateChange(
     (_event, session) => {
       loadProfile(session);
@@ -1194,12 +1268,10 @@ useEffect(() => {
 }, []);
 
 
-  // === EFEITO 2: BUSCAR TODOS OS DADOS DA APLICAÇÃO APÓS O LOGIN ===
   useEffect(() => {
     if (loggedInUser) {
         const fetchData = async () => {
             try {
-                // Executa todas as buscas em paralelo para mais performance
                 const [doctorsRes, hospitalsRes, plansRes, surgeriesRes] = await Promise.all([
                     supabase.from('doctors').select('*'),
                     supabase.from('hospitals').select('*'),
@@ -1218,10 +1290,7 @@ useEffect(() => {
     }
   }, [loggedInUser, addToast]);
 
-  // === EFEITO 3: OUVIR MUDANÇAS EM TEMPO REAL (REALTIME) NA TABELA DE CIRURGIAS ===
   useEffect(() => {
-    // Este efeito garante que a UI de todos os usuários seja atualizada instantaneamente
-    // quando uma cirurgia é criada, atualizada ou deletada.
     const channel = supabase.channel('public:surgeries')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'surgeries' }, payload => {
         if (payload.eventType === 'INSERT') setSurgeries(current => [...current, payload.new as Surgery]);
@@ -1240,7 +1309,7 @@ useEffect(() => {
   } catch (err) {
     console.error("Erro ao sair:", err);
   } finally {
-    setLoggedInUser(null); // <- IMPORTANTE
+    setLoggedInUser(null);
     setUsers([]);
     setSurgeries([]);
     setHospitals([]);
@@ -1250,7 +1319,6 @@ useEffect(() => {
 };
 
 
-  // --- CORREÇÃO APLICADA: Lógica de salvamento robusta ---
   const handleSaveSurgery = async (formData: any, files: { preOp?: File, postOp?: File }) => {
     if (!loggedInUser) {
         addToast('Erro: Usuário não autenticado.', 'error');
@@ -1258,9 +1326,7 @@ useEffect(() => {
     }
 
     try {
-        // Função para limpar nomes de arquivos, removendo caracteres especiais.
         const sanitizeFilename = (name: string) => {
-            // Substitui caracteres acentuados e especiais por '_' e remove espaços múltiplos.
             return name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9.\-_]/g, '_').replace(/\s+/g, '_');
         };
 
@@ -1283,13 +1349,14 @@ useEffect(() => {
             post_op_xray_path = filePath;
         }
 
-        // Cria um objeto 'limpo' contendo APENAS os campos que existem na tabela 'surgeries'.
-        // Isso evita o erro "Invalid key" causado por enviar campos extras (ex: anestesista_cost).
+        // --- ALTERAÇÃO: Garante que a data seja nula se não for fornecida ---
+        const dateTimeUTC = formData.date_time ? new Date(formData.date_time).toISOString() : null;
+
         const dataToSave: Omit<Surgery, 'id'> = {
             patient_name: formData.patient_name,
             main_surgeon_id: formData.main_surgeon_id,
             participating_ids: formData.participating_ids || [],
-            date_time: formData.date_time,
+            date_time: dateTimeUTC,
             hospital_id: formData.hospital_id,
             insurance_id: formData.insurance_id,
             auth_status: formData.auth_status,
@@ -1306,7 +1373,7 @@ useEffect(() => {
 
         if (dbError) throw dbError;
 
-        addToast(surgeryToEdit ? 'Cirurgia atualizada com sucesso!' : 'Cirurgia salva com sucesso!', 'success');
+        addToast(surgeryToEdit ? 'Cirurgia atualizada com sucesso!' : 'Solicitação salva com sucesso!', 'success');
         setIsModalOpen(false);
         setSurgeryToEdit(null);
 
@@ -1315,7 +1382,7 @@ useEffect(() => {
         if (error.message.includes('Storage')) {
             errorMessage = `Falha no upload do arquivo: ${error.message}`;
         }
-        addToast(`Erro ao salvar cirurgia: ${errorMessage}`, 'error');
+        addToast(`Erro ao salvar: ${errorMessage}`, 'error');
     }
   };
 
@@ -1348,10 +1415,13 @@ useEffect(() => {
 
   const handleSurgeryDrop = async (surgeryId: number, newDate: Date) => {
     const surgeryToMove = surgeries.find(s => s.id === surgeryId);
-    if (!surgeryToMove) return;
+    if (!surgeryToMove || !surgeryToMove.date_time) return;
     const oldDateTime = new Date(surgeryToMove.date_time);
-    const newDateTimeString = `${newDate.getFullYear()}-${String(newDate.getMonth() + 1).padStart(2, '0')}-${String(newDate.getDate()).padStart(2, '0')}T${String(oldDateTime.getHours()).padStart(2, '0')}:${String(oldDateTime.getMinutes()).padStart(2, '0')}`;
-    const { error } = await supabase.from('surgeries').update({ date_time: newDateTimeString }).eq('id', surgeryId);
+    const newDateTime = new Date(newDate);
+    newDateTime.setHours(oldDateTime.getHours(), oldDateTime.getMinutes(), oldDateTime.getSeconds());
+    const newDateTimeUTC = newDateTime.toISOString();
+
+    const { error } = await supabase.from('surgeries').update({ date_time: newDateTimeUTC }).eq('id', surgeryId);
     if (error) addToast(`Erro ao reagendar cirurgia: ${error.message}`, 'error');
     else addToast('Cirurgia reagendada com sucesso!', 'success');
   };
@@ -1368,7 +1438,17 @@ useEffect(() => {
   const handleSurgeryClick = (surgery: Surgery) => { setSurgeryToEdit(surgery); setIsModalOpen(true); setIsDayPanelOpen(false); };
   const handleSearchResultClick = (surgery: Surgery) => { handleSurgeryClick(surgery); setSearchQuery(''); };
 
-  // --- LÓGICA DE FILTRAGEM E MEMOIZAÇÃO (para performance) ---
+  // --- ALTERAÇÃO: Nova função para navegar com um filtro pré-definido ---
+  const handleNavigateWithFilter = (view: any, filters: any) => {
+      setInitialFilters(filters);
+      setCurrentView(view);
+  };
+  // --- ALTERAÇÃO: Reseta o filtro ao navegar normalmente pelo menu ---
+  const handleNavigate = (view: any) => {
+      setInitialFilters(null);
+      setCurrentView(view);
+  }
+
   const searchedSurgeries = useMemo(() => {
     if (!searchQuery.trim()) return [];
     return surgeries.filter(s => s.patient_name.toLowerCase().includes(searchQuery.toLowerCase()));
@@ -1377,10 +1457,9 @@ useEffect(() => {
   const surgeriesForSelectedDay = useMemo(() => {
       if (!selectedDateForPanel) return [];
       const panelDateStr = selectedDateForPanel.toDateString();
-      return surgeries.filter(s => new Date(s.date_time).toDateString() === panelDateStr);
+      return surgeries.filter(s => s.date_time && new Date(s.date_time).toDateString() === panelDateStr);
   }, [surgeries, selectedDateForPanel]);
 
-  // --- RENDERIZAÇÃO PRINCIPAL ---
   if (appLoading) {
      return (
         <div className="loading-fullscreen">
@@ -1397,8 +1476,9 @@ useEffect(() => {
 
   const renderContent = () => {
     switch (currentView) {
-      case 'dashboard': return <DashboardView surgeries={surgeries} users={users} hospitals={hospitals} onViewDetails={handleSurgeryClick} onUpdateStatus={handleUpdateSurgeryStatus} />;
+      case 'dashboard': return <DashboardView surgeries={surgeries} users={users} hospitals={hospitals} onViewDetails={handleSurgeryClick} onUpdateStatus={handleUpdateSurgeryStatus} onNavigateWithFilter={handleNavigateWithFilter} />;
       case 'agenda': return <CalendarView surgeries={surgeries} onDayClick={handleDayClick} onSurgeryClick={handleSurgeryClick} onSurgeryDrop={handleSurgeryDrop} users={users} hospitals={hospitals} insurancePlans={insurancePlans} />;
+      case 'solicitacoes': return <RequestsView surgeries={surgeries} users={users} insurancePlans={insurancePlans} onSurgeryClick={handleSurgeryClick} initialFilters={initialFilters} />;
       case 'relatorios': return <ReportsView surgeries={surgeries} hospitals={hospitals} insurancePlans={insurancePlans} users={users} theme={theme} />;
       case 'cadastros': return <SettingsView hospitals={hospitals} onAddHospital={handleAddHospital} onDeleteHospital={handleDeleteHospital} insurancePlans={insurancePlans} onAddPlan={handleAddPlan} onDeletePlan={handleDeletePlan} />;
       case 'admin': return loggedInUser.is_admin ? <AdminView users={users} loggedInUser={loggedInUser} addToast={addToast} onUsersChange={handleUsersChange} /> : null;
@@ -1409,7 +1489,7 @@ useEffect(() => {
   return (
     <div className="app-container" data-theme={theme}>
       <AppHeader
-        currentView={currentView} onNavigate={setCurrentView} loggedInUser={loggedInUser} onLogout={handleLogout}
+        currentView={currentView} onNavigate={handleNavigate} loggedInUser={loggedInUser} onLogout={handleLogout}
         searchQuery={searchQuery} onSearchChange={e => setSearchQuery(e.target.value)} theme={theme}
         onToggleTheme={() => setTheme(p => p === 'light' ? 'dark' : 'light')}
       />
@@ -1417,12 +1497,12 @@ useEffect(() => {
           <div className="search-results"><ul>{searchedSurgeries.map(surgery => (
               <li key={surgery.id} onClick={() => handleSearchResultClick(surgery)}>
                   <div className="result-patient">{surgery.patient_name}</div>
-                  <div className="result-details">{getUserById(surgery.main_surgeon_id, users)?.name} - {new Date(surgery.date_time).toLocaleDateString('pt-BR')}</div>
+                  <div className="result-details">{getUserById(surgery.main_surgeon_id, users)?.name} - {surgery.date_time ? new Date(surgery.date_time).toLocaleDateString('pt-BR') : 'A agendar'}</div>
               </li>))}</ul>
           </div>
       )}
       <main className="main-content">{renderContent()}</main>
-      <button className="fab" onClick={() => handleAddNewSurgery(new Date())} aria-label="Adicionar nova cirurgia"><span className="material-symbols-outlined">add</span></button>
+      <button className="fab" onClick={() => handleAddNewSurgery(new Date())} aria-label="Adicionar nova solicitação"><span className="material-symbols-outlined">add</span></button>
 
       <SurgeryModal
         isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onSave={handleSaveSurgery}
@@ -1439,29 +1519,16 @@ useEffect(() => {
 };
 
 // --- PONTO DE ENTRADA E RENDERIZAÇÃO FINAL NA DOM ---
-
-/**
- * Componente "Wrapper" (Invólucro)
- * Sua única responsabilidade é envolver a aplicação principal com o ToastProvider,
- * para que o sistema de notificações esteja disponível em toda a aplicação.
- */
 const AppWrapper = () => (
   <ToastProvider>
     <App />
   </ToastProvider>
 );
 
-// Encontra o container principal no arquivo public/index.html
 const container = document.getElementById('root');
 
-// Garante que o container existe antes de tentar renderizar
 if (container) {
-    // Cria a "raiz" da aplicação React
     const root = createRoot(container);
-
-    // Renderiza a aplicação inteira dentro do container.
-    // O <React.StrictMode> é um wrapper que ajuda a encontrar potenciais problemas na aplicação
-    // durante o desenvolvimento, mas não afeta a build de produção.
     root.render(
       <React.StrictMode>
         <AppWrapper />
