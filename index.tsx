@@ -5,7 +5,7 @@ import { supabase } from './supabaseClient'; // Importa o cliente Supabase que v
 
 // --- TIPOS DE DADOS (ALINHADOS COM O BANCO DE DADOS) --- //
 // --- ALTERAÇÃO (EQUIPES): Adicionada a propriedade team_id a todas as interfaces relevantes ---
-
+// --- ALTERAÇÃO (SOLICITAÇÃO DO USUÁRIO): Adicionado o campo 'procedure_name' ---
 interface Doctor {
   id: string;
   name: string;
@@ -30,6 +30,7 @@ interface InsurancePlan {
 interface Surgery {
   id: number;
   patient_name: string;
+  procedure_name: string; // ALTERAÇÃO: Adicionado para atender à solicitação do usuário
   main_surgeon_id: string;
   participating_ids: string[];
   date_time: string | null;
@@ -224,16 +225,19 @@ const AppHeader: React.FC<{
 const SurgeryModal: React.FC<{
   isOpen: boolean; onClose: () => void;
   onSave: (data: Omit<Surgery, 'id' | 'team_id'>, files: { preOp?: File, postOp?: File }) => void;
+  onDelete: (surgeryId: number) => void; // ALTERAÇÃO: Adicionada prop para exclusão
   hospitals: Hospital[]; insurancePlans: InsurancePlan[]; surgeryToEdit: Surgery | null;
   initialDate: Date; loggedInUser: Doctor; users: Doctor[];
-}> = ({ isOpen, onClose, onSave, hospitals, insurancePlans, surgeryToEdit, initialDate, loggedInUser, users }) => {
+}> = ({ isOpen, onClose, onSave, onDelete, hospitals, insurancePlans, surgeryToEdit, initialDate, loggedInUser, users }) => {
   const { addToast } = useToast();
 
   const createInitialState = useCallback(() => {
-    const defaultDateTime = surgeryToEdit?.date_time ? new Date(surgeryToEdit.date_time).toISOString().slice(0, 16) : null;
+    const defaultDateTime = surgeryToEdit?.date_time ? new Date(surgeryToEdit.date_time).toISOString().slice(0, 16) : new Date(initialDate).toISOString().slice(0,16);
     const mainSurgeonId = loggedInUser.id || '';
     return {
-        patient_name: '', main_surgeon_id: mainSurgeonId, participating_ids: [] as string[], date_time: defaultDateTime,
+        patient_name: '',
+        procedure_name: '',
+        main_surgeon_id: mainSurgeonId, participating_ids: [] as string[], date_time: defaultDateTime,
         hospital_id: hospitals[0]?.id || 0, insurance_id: insurancePlans[0]?.id || 0, auth_status: 'Pendente' as const,
         surgery_status: 'Solicitada' as const, fees: { [mainSurgeonId]: 0 }, notes: '',
         pre_op_xray_path: undefined, post_op_xray_path: undefined,
@@ -243,7 +247,7 @@ const SurgeryModal: React.FC<{
         hospital_uti_cost: 0,
         material_cost: 0,
     };
-  }, [loggedInUser, hospitals, insurancePlans, surgeryToEdit]);
+  }, [loggedInUser, hospitals, insurancePlans, surgeryToEdit, initialDate]);
 
 
   const [formData, setFormData] = useState(createInitialState());
@@ -319,6 +323,13 @@ const SurgeryModal: React.FC<{
     onSave(formData as any, files);
   };
 
+  // ALTERAÇÃO: Handler para o clique no botão de excluir
+  const handleDeleteClick = () => {
+      if(surgeryToEdit) {
+        onDelete(surgeryToEdit.id);
+      }
+  }
+
   const otherDoctors = users.filter(d => d.id !== formData.main_surgeon_id);
   const totalFees = useMemo(() => Object.values(formData.fees || {}).reduce((sum, fee) => sum + fee, 0), [formData.fees]);
 
@@ -358,7 +369,8 @@ const SurgeryModal: React.FC<{
           </div>
           <div className="modal-body">
             <div className="form-section"><h4>Detalhes do Paciente e Equipe</h4><div className="form-grid">
-              <div className="form-group full-width"><label htmlFor="patient_name">Paciente</label><input type="text" id="patient_name" name="patient_name" value={formData.patient_name} onChange={handleChange} required /></div>
+              <div className="form-group"><label htmlFor="patient_name">Paciente</label><input type="text" id="patient_name" name="patient_name" value={formData.patient_name} onChange={handleChange} required /></div>
+              <div className="form-group"><label htmlFor="procedure_name">Procedimento</label><input type="text" id="procedure_name" name="procedure_name" value={formData.procedure_name} onChange={handleChange} placeholder="Ex: Artroplastia de Quadril"/></div>
               <div className="form-group"><label htmlFor="main_surgeon_id">Cirurgião Principal</label><select id="main_surgeon_id" name="main_surgeon_id" value={formData.main_surgeon_id} onChange={handleChange}>{users.map(doc => <option key={doc.id} value={doc.id}>{doc.name}</option>)}</select></div>
               <div className="form-group"><label>Médicos Participantes</label><div className="checkbox-container">{otherDoctors.map(doc => (<label key={doc.id}><input type="checkbox" checked={(formData.participating_ids || []).includes(doc.id)} onChange={() => handleCheckboxChange(doc.id)} />{doc.name}</label>))}</div></div>
             </div></div>
@@ -388,10 +400,19 @@ const SurgeryModal: React.FC<{
               <div className="form-group full-width"><label htmlFor="post_op_xray_path">Raio-X Pós-cirúrgico</label>
                 {formData.post_op_xray_path ? (<div className="file-display"><a href={getPublicUrl(formData.post_op_xray_path)} target="_blank" rel="noopener noreferrer">{formData.post_op_xray_path.split('/').pop()}</a><button type="button" className="btn-remove-file" onClick={() => setFormData(p => ({...p, post_op_xray_path: undefined}))}>&times;</button></div>) : (<input type="file" id="post_op_xray_path" name="post_op_xray_path" onChange={handleFileChange} accept="image/*,.pdf" />)}
               </div>
-              <div className="form-group full-width"><label htmlFor="notes">Notas (procedimento, detalhes, etc)</label><textarea id="notes" name="notes" value={formData.notes} onChange={handleChange}></textarea></div>
+              <div className="form-group full-width"><label htmlFor="notes">Notas (detalhes adicionais, etc)</label><textarea id="notes" name="notes" value={formData.notes} onChange={handleChange}></textarea></div>
             </div></div>
           </div>
-          <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={onClose}>Cancelar</button><button type="submit" className="btn btn-primary">Salvar</button></div>
+          {/* ALTERAÇÃO: Adicionado o botão de excluir */}
+          <div className="modal-footer">
+            {surgeryToEdit && (
+                <button type="button" className="btn btn-danger" onClick={handleDeleteClick} style={{ marginRight: 'auto' }}>
+                    Excluir
+                </button>
+            )}
+            <button type="button" className="btn btn-secondary" onClick={onClose}>Cancelar</button>
+            <button type="submit" className="btn btn-primary">Salvar</button>
+          </div>
         </form>
       </div>
     </div>
@@ -536,7 +557,9 @@ const CalendarView: React.FC<{
 
     const filteredSurgeries = useMemo(() => {
         return surgeries.filter(s => {
-            if (!['Agendada', 'Realizada'].includes(s.surgery_status)) return false;
+            if (!s.date_time) {
+                return false;
+            }
             if (doctorFilter !== 'all' && s.main_surgeon_id !== doctorFilter && !(s.participating_ids || []).includes(String(doctorFilter))) return false;
             if (advancedFilters.auth_status !== 'all' && s.auth_status !== advancedFilters.auth_status) return false;
             if (advancedFilters.surgery_status !== 'all' && s.surgery_status !== advancedFilters.surgery_status) return false;
@@ -554,7 +577,7 @@ const CalendarView: React.FC<{
         const hospital = hospitals.find(h => h.id === s.hospital_id)?.name || 'N/A';
         const insurance = insurancePlans.find(p => p.id === s.insurance_id)?.name || 'N/A';
         const dateTime = s.date_time ? new Date(s.date_time).toLocaleString('pt-BR') : 'A definir';
-        return `Paciente: ${s.patient_name}\nData: ${dateTime}\nHospital: ${hospital}\nConvênio: ${insurance}\nCirurgião: ${mainSurgeon}\n${participants ? `Equipe: ${participants}\n` : ''}Status: ${s.surgery_status}`;
+        return `Paciente: ${s.patient_name}\nProcedimento: ${s.procedure_name || 'N/A'}\nData: ${dateTime}\nHospital: ${hospital}\nConvênio: ${insurance}\nCirurgião: ${mainSurgeon}\n${participants ? `Equipe: ${participants}\n` : ''}Status: ${s.surgery_status}`;
     };
 
     const onDragStart = (e: React.DragEvent, surgeryId: number) => e.dataTransfer.setData("surgeryId", String(surgeryId));
@@ -591,7 +614,7 @@ const CalendarView: React.FC<{
         <div className={gridClass}>
             {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map(day => <div key={day} className="calendar-header">{day}</div>)}
             {displayedGrid.map((date, index) => {
-                const daySurgeries = date ? filteredSurgeries.filter(s => s.date_time && new Date(s.date_time).toDateString() === date.toDateString()) : [];
+                const daySurgeries = date ? filteredSurgeries.filter(s => new Date(s.date_time!).toDateString() === date.toDateString()) : [];
                 const dateString = date ? date.toISOString().split('T')[0] : '';
                 return (
                     <div key={index} className={`calendar-day ${!date ? 'other-month' : ''} ${date && date.getTime() === today.getTime() ? 'today' : ''} ${dateString === dragOverDate ? 'drag-over' : ''}`} onClick={() => date && onDayClick(date)} onDragOver={onDragOver} onDrop={(e) => date && onDrop(e, date)} onDragEnter={() => date && setDragOverDate(date.toISOString().split('T')[0])} onDragLeave={() => setDragOverDate(null)}>
@@ -599,9 +622,18 @@ const CalendarView: React.FC<{
                         {daySurgeries.sort((a,b) => new Date(a.date_time!).getTime() - new Date(b.date_time!).getTime()).map(s => {
                             const doctor = getUserById(s.main_surgeon_id, users);
                             return (
-                                <div key={s.id} draggable onDragStart={(e) => onDragStart(e, s.id)} className="surgery-item" style={{ '--doctor-color': doctor?.color } as React.CSSProperties} onClick={(e) => { e.stopPropagation(); onSurgeryClick(s); }} title={getSurgeryTooltip(s)}>
-                                    <div className="surgery-item-header"><span className="surgery-time">{s.date_time ? new Date(s.date_time).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit'}) : ''}</span><span className={`material-symbols-outlined auth-status-icon status-${s.auth_status.toLowerCase()}`}>{getAuthStatusIcon(s.auth_status)}</span></div>
-                                    <div className="surgery-item-body"><span className="surgery-patient">{s.patient_name}</span><span className="surgery-hospital">{hospitals.find(h => h.id === s.hospital_id)?.name || 'N/A'}</span></div>
+                                <div key={s.id} draggable onDragStart={(e) => onDragStart(e, s.id)} className={`surgery-item status-surgery-${s.surgery_status.toLowerCase()}`} style={{ '--doctor-color': doctor?.color } as React.CSSProperties} onClick={(e) => { e.stopPropagation(); onSurgeryClick(s); }} title={getSurgeryTooltip(s)}>
+                                    <div className="surgery-item-header">
+                                        <span className="surgery-time">{new Date(s.date_time!).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit'})}</span>
+                                        <span className={`material-symbols-outlined auth-status-icon status-${s.auth_status.toLowerCase()}`}>{getAuthStatusIcon(s.auth_status)}</span>
+                                    </div>
+                                    <div className="surgery-item-body">
+                                        <span className="surgery-patient">{s.patient_name}</span>
+                                        <span className="surgery-hospital">{hospitals.find(h => h.id === s.hospital_id)?.name || 'N/A'}</span>
+                                    </div>
+                                    <div className="surgery-item-footer">
+                                        <span className={`status-tag-agenda status-surgery-${s.surgery_status.toLowerCase()}`}>{s.surgery_status}</span>
+                                    </div>
                                 </div>
                             );
                         })}
@@ -895,7 +927,8 @@ const RequestsView: React.FC<{
                    {s.surgery_status === 'Agendada' && s.date_time && (
                      <p><strong>Agendado:</strong> {new Date(s.date_time).toLocaleString('pt-BR')}</p>
                    )}
-                  {s.notes && <p><strong>Procedimento:</strong> {s.notes}</p>}
+                  <p><strong>Procedimento:</strong> {s.procedure_name || 'Não especificado'}</p>
+                  {s.notes && <p><strong>Notas:</strong> {s.notes}</p>}
                 </div>
                 <div className="request-card-footer">
                   Clique para editar, agendar ou alterar status
@@ -944,7 +977,6 @@ const AdminView: React.FC<{
       return;
     }
 
-    // --- ALTERAÇÃO (EQUIPES): Garante que o admin logado tem uma equipe antes de criar um novo usuário.
     if (!loggedInUser?.team_id) {
         addToast('Erro: Equipe do administrador não encontrada. Não é possível criar um novo usuário.', 'error');
         return;
@@ -971,20 +1003,16 @@ const AdminView: React.FC<{
             if (authError) throw authError;
             if (!authData.user) throw new Error("Não foi possível criar o usuário na autenticação.");
 
-            // --- ALTERAÇÃO (EQUIPES): Adiciona o team_id ao criar um novo perfil de médico.
             const { error: profileError } = await supabase.from('doctors').insert({
               id: authData.user.id,
               name: formState.name,
               email: formState.email,
               is_admin: formState.is_admin,
               color: `hsl(${Math.random() * 360}, 70%, 50%)`,
-              team_id: loggedInUser.team_id // O novo usuário entra na equipe do admin que o criou.
+              team_id: loggedInUser.team_id
             });
 
             if (profileError) {
-                // Tenta reverter a criação do usuário na autenticação se a criação do perfil falhar.
-                // Idealmente, isso seria feito com uma função de borda segura.
-                // await supabase.auth.admin.deleteUser(authData.user.id);
                 throw profileError;
             }
             addToast('Usuário adicionado com sucesso!', 'success');
@@ -1060,7 +1088,11 @@ const DayDetailPanel: React.FC<{ isOpen: boolean; onClose: () => void; selectedD
                             const doctor = getUserById(s.main_surgeon_id, users);
                             const time = s.date_time ? new Date(s.date_time).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit'}) : '';
                             return (<div key={s.id} className="surgery-item" onClick={() => onSurgeryClick(s)} style={{'--doctor-color': doctor?.color} as React.CSSProperties}>
-                                <div className="surgery-item-content"><span className="surgery-time">{time}</span><span className="surgery-patient">{s.patient_name}</span></div>
+                                <div className="surgery-item-content">
+                                    <span className="surgery-time">{time}</span>
+                                    <span className="surgery-patient">{s.patient_name}</span>
+                                    <span className={`status-tag-details status-surgery-${s.surgery_status.toLowerCase()}`}>{s.surgery_status}</span>
+                                </div>
                             </div>);
                         })
                     ) : ( <div className="no-surgeries"><span className="material-symbols-outlined">event_busy</span><p>Nenhuma cirurgia neste dia.</p></div> )}
@@ -1132,7 +1164,6 @@ useEffect(() => {
     if (loggedInUser) {
         const fetchData = async () => {
             try {
-                // As chamadas permanecem as mesmas. A RLS do Supabase filtra os dados automaticamente no backend.
                 const [doctorsRes, hospitalsRes, plansRes, surgeriesRes] = await Promise.all([
                     supabase.from('doctors').select('*'),
                     supabase.from('hospitals').select('*'),
@@ -1150,7 +1181,6 @@ useEffect(() => {
   }, [loggedInUser, addToast]);
 
   useEffect(() => {
-    // --- ALTERAÇÃO (EQUIPES): O canal de realtime agora é específico da equipe para otimizar a performance.
     if (!loggedInUser?.team_id) return;
     const channel = supabase.channel(`public:surgeries:team_id=eq.${loggedInUser.team_id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'surgeries', filter: `team_id=eq.${loggedInUser.team_id}` }, payload => {
@@ -1194,6 +1224,7 @@ useEffect(() => {
 
         const dataToSave: Omit<Surgery, 'id'> = {
             patient_name: formData.patient_name,
+            procedure_name: formData.procedure_name,
             main_surgeon_id: formData.main_surgeon_id,
             participating_ids: formData.participating_ids || [],
             date_time: dateTimeUTC,
@@ -1206,7 +1237,7 @@ useEffect(() => {
             notes: formData.notes || '',
             pre_op_xray_path: pre_op_xray_path,
             post_op_xray_path: post_op_xray_path,
-            team_id: loggedInUser.team_id, // --- ALTERAÇÃO (EQUIPES): Adiciona o team_id ao salvar.
+            team_id: loggedInUser.team_id,
         };
 
         const idToUpsert = surgeryToEdit ? { id: surgeryToEdit.id } : {};
@@ -1220,9 +1251,23 @@ useEffect(() => {
     }
   };
 
+  // ALTERAÇÃO: Adicionada função para lidar com a exclusão de cirurgias
+  const handleDeleteSurgery = async (surgeryId: number) => {
+    if (window.confirm('Tem certeza de que deseja excluir esta cirurgia? Esta ação não pode ser desfeita.')) {
+        try {
+            const { error } = await supabase.from('surgeries').delete().eq('id', surgeryId);
+            if (error) throw error;
+            addToast('Cirurgia excluída com sucesso!', 'success');
+            setIsModalOpen(false);
+            setSurgeryToEdit(null);
+        } catch (error: any) {
+            addToast(`Erro ao excluir: ${error.message}`, 'error');
+        }
+    }
+  };
+
   const handleAddHospital = async (name: string) => {
       if (!loggedInUser?.team_id) { addToast('Erro: Equipe do usuário não encontrada.', 'error'); return; }
-      // --- ALTERAÇÃO (EQUIPES): Inclui o team_id na inserção.
       const { data, error } = await supabase.from('hospitals').insert({ name, team_id: loggedInUser.team_id }).select().single();
       if(error) addToast(`Erro: ${error.message}`, 'error'); else { setHospitals(prev => [...prev, data]); addToast('Hospital adicionado!', 'success'); }
   };
@@ -1232,7 +1277,6 @@ useEffect(() => {
   };
   const handleAddPlan = async (name: string) => {
       if (!loggedInUser?.team_id) { addToast('Erro: Equipe do usuário não encontrada.', 'error'); return; }
-      // --- ALTERAÇÃO (EQUIPES): Inclui o team_id na inserção.
       const { data, error } = await supabase.from('insurance_plans').insert({ name, team_id: loggedInUser.team_id }).select().single();
       if(error) addToast(`Erro: ${error.message}`, 'error'); else { setInsurancePlans(prev => [...prev, data]); addToast('Convênio adicionado!', 'success'); }
   };
@@ -1317,6 +1361,7 @@ useEffect(() => {
       <button className="fab" onClick={() => handleAddNewSurgery(new Date())} aria-label="Adicionar nova solicitação"><span className="material-symbols-outlined">add</span></button>
       <SurgeryModal
         isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onSave={handleSaveSurgery}
+        onDelete={handleDeleteSurgery} // ALTERAÇÃO: Passando a função de exclusão
         hospitals={hospitals} insurancePlans={insurancePlans} surgeryToEdit={surgeryToEdit}
         initialDate={modalInitialDate} loggedInUser={loggedInUser} users={users}
       />
